@@ -21,10 +21,10 @@ from game.constants import (
     REWARD_GOAL,
 )
 
-#: Distribution de probabilités sur les actions, indexée par ``Action``.
+# Distribution de probabilités sur les actions, indexée par ``Action``.
 Strategy: TypeAlias = tuple[float, ...]
 
-#: Matrice des gains de l'attaquant : ``matrix[attaquant][gardien]``.
+# Matrice des gains de l'attaquant : ``matrix[attaquant][gardien]``.
 PayoffMatrix: TypeAlias = tuple[tuple[float, ...], ...]
 
 
@@ -120,6 +120,10 @@ class RoundResult:
     Le gain du gardien et l'indicateur de but sont dérivés du gain de
     l'attaquant, ce qui garantit la somme nulle par construction.
 
+    Attention:
+        ``is_goal`` repose sur les gains ±1 du modèle de base (voir
+        ``docs/game_theory.md``, §7).
+
     Attributes:
         round_number: Numéro de la manche, à partir de 1.
         attacker_action: Zone choisie par l'attaquant.
@@ -191,7 +195,8 @@ class MatchConfig:
         goalkeeper_agent: Agent gardien, ou ``None`` si l'humain garde.
         seed: Graine de reproductibilité, entier positif ou nul.
         payoff_matrix: Matrice des gains personnalisée, ou ``None`` pour
-            utiliser la matrice de référence.
+            utiliser la matrice de référence (voir
+            ``game.payoff.resolve_payoff_matrix``).
 
     Raises:
         ValueError: Si le nombre de manches est hors bornes, si la graine
@@ -317,6 +322,10 @@ class Experiment:
     Les parties humain contre IA ne produisent pas d'``Experiment`` : leur
     historique est une simple séquence de ``RoundResult``.
 
+    Remarque:
+        ``created_at`` est la seule donnée non reproductible. Pour comparer
+        deux expériences de même graine, comparer ``rounds``.
+
     Attributes:
         config: Configuration utilisée (contient la graine).
         created_at: Date de création, en UTC avec fuseau horaire.
@@ -363,3 +372,16 @@ class Equilibrium:
     attacker_strategy: Strategy
     goalkeeper_strategy: Strategy
     value: float
+
+    def strategy_of(self, role: Role) -> Strategy:
+        """Retourne la stratégie optimale d'un rôle.
+
+        Args:
+            role: Rôle dont on souhaite la stratégie.
+
+        Returns:
+            La stratégie optimale de ce rôle.
+        """
+        if role is Role.ATTACKER:
+            return self.attacker_strategy
+        return self.goalkeeper_strategy

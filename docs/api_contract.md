@@ -1,8 +1,9 @@
 # Contrat d'API — Penalty Shootout AI Arena
 
-| Version | Date       | Auteur   | Changement                  |
-|---------|------------|----------|-----------------------------|
-| 1.0.0   | 2026-11-09 | Ledestin | Version initiale (fondations) |
+| Version | Date       | Auteur   | Changement                                        |
+|---------|------------|----------|---------------------------------------------------|
+| 1.0.0   | 2026-11-09 | Ledestin | Version initiale (fondations)                     |
+| 1.1.0   | 2026-11-09 | Ledestin | Graphe de dépendances corrigé, `validate_config`, `resolve_payoff_matrix`, `Equilibrium.strategy_of`, `equilibrium.py` et `metrics.py` |
 
 Ce document est la **source de vérité** pour les interfaces entre les quatre
 membres. En cas de désaccord entre le code et ce document, on corrige l'un des
@@ -21,33 +22,40 @@ Le contrat définit :
 - les règles de communication entre membres ;
 - la politique anti-fuite d'information entre agents.
 
-Il ne modifie pas l'architecture du cahier des charges.
+Il ne modifie pas l'architecture du cahier des charges. Il la précise.
 
 ---
 
 ## 2. Principes d'architecture
 
-1. **Dépendances à sens unique** (une couche n'importe que les couches
-   précédentes) :
+1. **Dépendances à sens unique** : un module n'importe que des modules des
+   couches situées au-dessus de lui.
 
 ```text
-game/actions.py
-   └─> game/constants.py
-         └─> game/models.py
-               └─> game/payoff.py ─> game/rules.py
-                     └─> theory/validation.py ─> theory/equilibrium.py ─> theory/metrics.py
-                           └─> agents/*                 (utilisent equilibrium)
-                                 └─> game/simulation.py (orchestre agents + règles + métriques)
-                                       └─> visualization/* ─> ui/* ─> app.py
+1. game/actions.py
+2. game/constants.py        (importe : actions)
+3. game/models.py           (importe : actions, constants)
+4. theory/validation.py     (importe : constants, models)
+5. game/payoff.py           (importe : actions, constants, models)
+6. game/rules.py            (importe : actions, models, payoff, theory.validation)
+7. theory/equilibrium.py    (importe : actions, constants, models, theory.validation)
+8. theory/metrics.py        (importe : actions, models, game.rules,
+                                       theory.equilibrium, theory.validation)
+9. agents/*                 (importent : actions, constants, models,
+                                         theory.equilibrium, theory.validation)
+10. game/simulation.py      (importe : agents, game.*, theory.metrics)
+11. visualization/*         (importent : modèles et résultats)
+12. ui/*                    (importent : simulation, agents, visualization)
+13. app.py
 ```
 
 2. **Responsabilité unique** : un module = une raison de changer.
-3. **Aucune logique dupliquée** : meilleure réponse, validation et métriques
-   n'existent qu'à un seul endroit (voir §3).
+3. **Aucune logique dupliquée** : meilleure réponse, validation, résolution de
+   la matrice effective et métriques n'existent qu'à un seul endroit (voir §3).
 4. **Données immuables** : toutes les dataclasses partagées sont
    `frozen=True, slots=True`.
 5. **Aucun état global** : pas de variable de module mutable, pas de
-   générateur aléatoire global.
+   générateur aléatoire global, pas de cache global.
 
 ---
 
@@ -57,16 +65,16 @@ game/actions.py
 |--------|-------------|----------------|-------------|
 | `game/actions.py` | M1 | Enum `Action` | Contenir de la logique de jeu |
 | `game/constants.py` | M1 | Constantes métier, tolérances, valeurs par défaut | Importer autre chose que `Action` |
-| `game/models.py` | M1 | Structures de données partagées | Contenir de la logique métier (hors invariants) |
-| `game/payoff.py` | M1 | Construction de la matrice, lecture d'un gain | Valider les actions |
-| `game/rules.py` | M1 | Validation des actions, résolution d'une manche, score | Connaître les agents |
-| `game/simulation.py` | M1 | Orchestration d'un match IA vs IA et d'une manche humain vs IA | Calculer des métriques ou des graphiques |
-| `theory/equilibrium.py` | M1 | Stratégie minimax (programmation linéaire), valeur du jeu, **meilleure réponse** | Dépendre des agents |
-| `theory/metrics.py` | M4 (formules validées par M1) | Fréquences empiriques, écart à l'équilibre, exploitabilité, `AgentStats` | Faire des appels à l'UI |
-| `theory/validation.py` | M1 | Vérifie stratégies et matrices (somme = 1, positivité, forme) | Corriger silencieusement les données |
+| `game/models.py` | M1 | Structures de données partagées | Contenir de la logique métier (hors invariants et propriétés dérivées) |
+| `theory/validation.py` | M1 | Vérifie stratégies et matrices (taille, valeurs finies, positivité, somme = 1) | Importer `game.rules`, `game.payoff`, un agent, `game.simulation`, `ui` ou `visualization` ; corriger silencieusement les données |
+| `game/payoff.py` | M1 | Matrice de référence, résolution de la matrice effective, lecture d'un gain | Valider les actions ou la matrice |
+| `game/rules.py` | M1 | Validation des actions et des configurations, résolution d'une manche, score. Peut importer `theory.validation`. | Connaître les agents |
+| `theory/equilibrium.py` | M1 | Stratégie minimax (programmation linéaire), valeur du jeu, **meilleure réponse** | Dépendre des agents ou de `game.rules` |
+| `theory/metrics.py` | M1 (formules) ; M4 peut ajouter des métriques de benchmark | Stratégie empirique, taux de buts/arrêts, gain moyen, distance à l'équilibre, exploitabilité, `AgentStats` | Faire des appels à l'UI |
 | `agents/base_agent.py` | M2 | Classe abstraite `BaseAgent` | Connaître l'adversaire |
 | `agents/*_agent.py` | M2 | Un agent par fichier | Importer `game.simulation`, `ui`, `visualization` |
 | `agents/__init__.py` | M2 | Fabrique `create_agent` (seul point de création) | Contenir de la logique d'agent |
+| `game/simulation.py` | M1 | Orchestration d'un match IA vs IA et d'une manche humain vs IA | Calculer des métriques ou des graphiques |
 | `ui/*` | M3 | Pages Streamlit, saisie, affichage | Calculer des métriques ou des équilibres |
 | `visualization/*` | M4 | Figures Plotly à partir des structures partagées | Recalculer des résultats |
 | `tests/*` | Propriétaire du module testé | Tests unitaires et d'intégration | — |
@@ -74,8 +82,13 @@ game/actions.py
 **Règle de réutilisation** : toute nouvelle logique commune est placée dans le
 module de la table ci-dessus qui en a la responsabilité, jamais copiée.
 Exemples : la meilleure réponse est dans `theory/equilibrium.py`, la
-validation dans `theory/validation.py`, l'affichage d'une action est
-`Action.label`.
+validation dans `theory/validation.py`, la matrice effective dans
+`game.payoff.resolve_payoff_matrix`, l'affichage d'une action est
+`Action.label`, la stratégie d'un rôle est `Equilibrium.strategy_of`.
+
+**Règles d'import de `theory/validation.py`** : il ne doit jamais importer
+`game.rules`, jamais importer `game.payoff`, jamais importer un agent. Il ne
+dépend que de `game.constants` et `game.models`.
 
 ---
 
@@ -87,16 +100,16 @@ Toutes sont définies dans `game/models.py` (sauf `Action`, dans
 | Nom | Type | Rôle |
 |-----|------|------|
 | `Action` | `IntEnum` | `LEFT=0`, `CENTER=1`, `RIGHT=2` ; sert aussi d'indice |
-| `Role` | `StrEnum` | `ATTACKER`, `GOALKEEPER` ; propriété `opponent` |
+| `Role` | `StrEnum` | `ATTACKER`, `GOALKEEPER` ; propriétés `opponent`, `label` |
 | `AgentType` | `StrEnum` | `DETERMINISTIC`, `FREQUENCY`, `MINIMAX`, `FICTITIOUS_PLAY` |
 | `Strategy` | alias `tuple[float, ...]` | Distribution sur les 3 actions, indexée par `Action` |
 | `PayoffMatrix` | alias `tuple[tuple[float, ...], ...]` | Gains de l'attaquant ; `m[attaquant][gardien]` |
 | `Observation` | dataclass | Information **autorisée** donnée à un agent : `role`, `round_number` |
-| `RoundResult` | dataclass | Résultat d'une manche révélée |
+| `RoundResult` | dataclass | Résultat d'une manche révélée ; `action_of(role)`, `reward_for(role)` |
 | `MatchConfig` | dataclass | Paramètres d'un match ou d'une expérience |
 | `AgentStats` | dataclass | Statistiques agrégées d'un agent sur un match |
 | `Experiment` | dataclass | Match IA vs IA complet, reproductible |
-| `Equilibrium` | dataclass | Stratégies optimales et valeur du jeu |
+| `Equilibrium` | dataclass | Stratégies optimales et valeur du jeu ; `strategy_of(role)` |
 
 ### Conventions sur les données
 
@@ -106,17 +119,21 @@ Toutes sont définies dans `game/models.py` (sauf `Action`, dans
   colonnes = action du gardien.
 - **Numéro de manche** : commence à **1**.
 - **Temps** : en **secondes** (`float`).
-- **Date** : `datetime` en UTC, avec fuseau horaire (`timezone.utc`).
+- **Date** : `datetime` en UTC, avec fuseau horaire.
 - **Probabilités** : positives, somme à 1 à `PROBABILITY_TOLERANCE` près.
 - **`AgentStats.goals` / `saves`** : buts marqués / arrêts réalisés lors des
   manches jouées par l'agent, quel que soit son rôle (pour un gardien,
   `goals` = buts concédés).
 - **Humain vs IA** : produit une liste de `RoundResult` (historique de session,
   F08) mais **pas** d'`Experiment`. Seuls les matchs IA vs IA en produisent.
-- **`MatchConfig.payoff_matrix = None`** signifie « matrice de référence »
-  (`game.payoff.build_reference_matrix()`).
+- **`MatchConfig.payoff_matrix = None`** signifie « matrice de référence ».
+  Les consommateurs obtiennent la matrice effective avec
+  `game.payoff.resolve_payoff_matrix`, sans réécrire cette règle.
 - **Agent à `None` dans `MatchConfig`** : désigne le joueur humain. Les deux
   à `None` sont interdits (pas de mode humain contre humain).
+- **Reproductibilité des `Experiment`** : `created_at` est la seule donnée non
+  reproductible. Pour comparer deux expériences de même graine, comparer
+  `rounds` (et non l'objet entier).
 
 ---
 
@@ -129,7 +146,7 @@ Toutes sont définies dans `game/models.py` (sauf `Action`, dans
 | Membres d'Enum et constantes | `UPPER_SNAKE_CASE` | `Action.LEFT`, `REWARD_GOAL` |
 | Éléments privés | préfixe `_` | `_ACTION_LABELS` |
 | Booléens | préfixe `is_`, `has_` | `is_goal` |
-| Fonctions | verbe d'action | `resolve_round`, `solve_equilibrium` |
+| Fonctions | verbe d'action ou nom de métrique | `resolve_round`, `solve_equilibrium`, `goal_rate` |
 | Branches Git | `feature/<membre>-<sujet>` | `feature/m2-minimax-agent` |
 | Commits | `type: description` (`feat`, `fix`, `test`, `docs`, `refactor`) | `feat: add frequency agent` |
 
@@ -144,7 +161,9 @@ Toutes sont définies dans `game/models.py` (sauf `Action`, dans
 ## 6. Conventions de typage
 
 - Python **3.11+**, vérification par `mypy --strict` (outil de développement
-  local, non listé dans `requirements.txt`).
+  local, non listé dans `requirements.txt`). SciPy n'étant pas typé de façon
+  complète, ajouter `ignore_missing_imports` pour le module `scipy.*` dans la
+  configuration de mypy.
 - Annotations obligatoires sur tous les paramètres, retours et attributs
   de classe.
 - Syntaxe moderne : `X | None`, `list[int]`, `tuple[float, ...]`.
@@ -163,13 +182,14 @@ Toutes sont définies dans `game/models.py` (sauf `Action`, dans
   (`from game.models import Role`).
 - Docstrings **Google Style** complètes pour tout module public, classe,
   énumération, dataclass et fonction.
-- Erreurs : `ValueError` pour une valeur invalide, `TypeError` pour un mauvais
-  type. Pas d'`assert` pour valider des entrées, pas de `print`, pas d'erreur
-  avalée silencieusement.
+- Erreurs : `ValueError` pour toute valeur invalide (actions, stratégies,
+  matrices, configurations). `RuntimeError` uniquement pour l'échec d'un
+  solveur numérique. Pas d'`assert` pour valider des entrées, pas de `print`,
+  pas d'erreur avalée silencieusement.
 
 ---
 
-## 7. Signatures principales prévues
+## 7. Signatures principales
 
 Les signatures sont **gelées à l'issue du jour 2** (voir §9). Les noms de
 paramètres font partie du contrat.
@@ -179,6 +199,10 @@ paramètres font partie du contrat.
 ```python
 def build_reference_matrix() -> PayoffMatrix:
     """Construit la matrice de référence 3x3 à partir des récompenses."""
+
+def resolve_payoff_matrix(payoff_matrix: PayoffMatrix | None) -> PayoffMatrix:
+    """Retourne la matrice effective : la matrice fournie, ou la matrice de
+    référence si l'argument est None."""
 
 def attacker_reward(
     attacker_action: Action,
@@ -193,6 +217,10 @@ def attacker_reward(
 ```python
 def validate_action(value: object) -> Action:
     """Convertit une valeur en Action valide ; lève ValueError sinon."""
+
+def validate_config(config: MatchConfig) -> None:
+    """Vérifie les règles métier d'une configuration (matrice personnalisée) ;
+    lève ValueError sinon. Peut s'appuyer sur theory.validation."""
 
 def resolve_round(
     round_number: int,
@@ -223,11 +251,20 @@ def play_human_round(
     résolue, puis l'agent est mis à jour."""
 ```
 
+L'interface valide la matrice (`validate_config` ou `validate_payoff_matrix`)
+à la création d'une partie : `play_human_round` ne la revalide pas à chaque
+manche.
+
 ### 7.4 `theory/equilibrium.py` (M1)
 
 ```python
 def solve_equilibrium(payoff_matrix: PayoffMatrix) -> Equilibrium:
-    """Calcule les stratégies minimax et la valeur du jeu (SciPy linprog)."""
+    """Calcule les stratégies minimax et la valeur du jeu (SciPy linprog).
+
+    Les stratégies retournées sont nettoyées (valeurs comprises entre
+    -NUMERICAL_NOISE_TOLERANCE et 0 ramenées à 0), renormalisées, puis
+    validées par validate_strategy. Lève ValueError si la matrice est
+    invalide, RuntimeError si le solveur échoue."""
 
 def best_response(
     payoff_matrix: PayoffMatrix,
@@ -236,17 +273,25 @@ def best_response(
 ) -> Action:
     """Meilleure réponse pure à une stratégie adverse.
 
-    Égalité : l'action d'indice le plus faible est retenue
-    (comportement déterministe et reproductible).
-    """
+    Égalité (à NUMERICAL_NOISE_TOLERANCE près) : l'action d'indice le plus
+    faible est retenue (comportement déterministe et reproductible)."""
 ```
 
-### 7.5 `theory/metrics.py` (M4)
+### 7.5 `theory/metrics.py` (M1)
 
 ```python
 def empirical_strategy(actions: Sequence[Action]) -> Strategy: ...
 
-def equilibrium_gap(strategy: Strategy, reference: Strategy) -> float:
+def goal_rate(rounds: Sequence[RoundResult]) -> float:
+    """Buts / manches."""
+
+def save_rate(rounds: Sequence[RoundResult]) -> float:
+    """Arrêts / manches."""
+
+def average_reward(rounds: Sequence[RoundResult], role: Role) -> float:
+    """Gain moyen par manche du point de vue du rôle donné."""
+
+def distance_to_equilibrium(strategy: Strategy, reference: Strategy) -> float:
     """Distance en variation totale : 0.5 * somme(|p_i - q_i|)."""
 
 def exploitability(
@@ -264,6 +309,12 @@ def compute_agent_stats(
     payoff_matrix: PayoffMatrix,
 ) -> AgentStats: ...
 ```
+
+`AgentStats.equilibrium_gap` est la valeur de `distance_to_equilibrium`
+entre la stratégie empirique et `Equilibrium.strategy_of(role)`.
+`AgentStats.goal_rate` / `save_rate` (propriétés) lisent les compteurs d'un
+`AgentStats` déjà agrégé ; `metrics.goal_rate` / `save_rate` travaillent sur
+une liste brute de `RoundResult`.
 
 ### 7.6 `theory/validation.py` (M1)
 
@@ -312,7 +363,8 @@ def create_agent(
   dans l'instance. Minimax tire son action selon sa stratégie mixte. Ce
   n'est pas un agent aléatoire (cf. cahier des charges, §2).
 - Les agents Fréquences et Fictitious Play utilisent **obligatoirement**
-  `theory.equilibrium.best_response`.
+  `theory.equilibrium.best_response`. Minimax utilise
+  `solve_equilibrium(...).strategy_of(role)`.
 
 ### 7.8 `ui/` et `visualization/` (M3 / M4)
 
@@ -355,10 +407,10 @@ données, pas sur la discipline des développeurs.
 7. **Information publique autorisée** : la matrice des gains (fournie au
    constructeur), son propre rôle, le numéro de manche et le résultat des
    manches terminées.
-8. **Interface humain vs IA.** `play_human_round` appelle `choose_action`
-   avec une `Observation` seule : l'action humaine n'est jamais transmise à
-   l'agent. L'interface n'affiche l'action de l'IA qu'**après** validation du
-   choix humain.
+8. **Interface humain vs IA.** `play_human_round` valide l'action humaine,
+   puis appelle `choose_action` avec une `Observation` seule : l'action
+   humaine n'est jamais transmise à l'agent avant résolution. L'interface
+   n'affiche l'action de l'IA qu'**après** validation du choix humain.
 9. **Imports interdits** dans `agents/` : `game.simulation`, `ui`,
    `visualization`, `streamlit`.
 10. **Tests obligatoires** (`tests/test_agents.py`, `tests/test_simulation.py`) :
@@ -376,9 +428,9 @@ données, pas sur la discipline des développeurs.
 
 | De | Vers | Fournit |
 |----|------|---------|
-| M1 | M2 | `Action`, `Observation`, matrice, `best_response`, `solve_equilibrium` |
+| M1 | M2 | `Action`, `Observation`, matrice, `best_response`, `solve_equilibrium`, `Equilibrium.strategy_of` |
 | M2 | M3 | `BaseAgent` et `create_agent` stables |
-| M1, M2 | M4 | `RoundResult`, `AgentStats`, `Experiment`, métriques |
+| M1, M2 | M4 | `RoundResult`, `AgentStats`, `Experiment`, fonctions de `theory/metrics.py` |
 | M3 ↔ M4 | — | Composants communs du laboratoire et du benchmark |
 
 ### 9.2 Évolution du contrat
@@ -419,6 +471,8 @@ données, pas sur la discipline des développeurs.
 - Benchmark : plusieurs graines `DEFAULT_SEED + k`, avec le même nombre de
   manches et les mêmes adversaires pour tous les agents.
 - Les paramètres et graines sont enregistrés dans `Experiment.config`.
+- `Experiment.created_at` n'est pas reproductible : les tests comparent
+  `Experiment.rounds`.
 
 ---
 
@@ -431,6 +485,30 @@ Chaque propriétaire teste son module. Tests transversaux :
 - `attacker_reward + goalkeeper_reward == 0` pour toute manche.
 - Toute `Strategy` retournée est positive et de somme 1.
 - `solve_equilibrium` retrouve la valeur `REFERENCE_GAME_VALUE` et la
-  stratégie `REFERENCE_EQUILIBRIUM_STRATEGY` à `EQUILIBRIUM_TOLERANCE` près.
+  stratégie `REFERENCE_EQUILIBRIUM_STRATEGY` à `EQUILIBRIUM_TOLERANCE` près,
+  pour l'attaquant comme pour le gardien.
+- `best_response` contre une stratégie uniforme retourne `Action.LEFT`
+  (règle de départage) ; contre « toujours gauche », l'attaquant répond
+  `Action.CENTER` et le gardien `Action.LEFT`.
+- `exploitability` vaut 0 à `EQUILIBRIUM_TOLERANCE` près pour la stratégie
+  d'équilibre et est strictement positive pour une stratégie pure.
+- `distance_to_equilibrium` vaut 0 pour deux stratégies identiques et 1 pour
+  deux stratégies pures différentes.
 - Un match IA vs IA termine exactement `num_rounds` manches.
 - Les tests d'anti-fuite du §8.
+
+---
+
+## 12. État d'avancement et dépendances à terme
+
+`game/simulation.py` dépend de deux modules :
+
+| Dépendance | Responsable | État (v1.1.0) |
+|------------|-------------|---------------|
+| `theory.metrics` (`compute_agent_stats`) | M1 | Disponible |
+| `agents` (`create_agent`, `BaseAgent`) | M2 | **Pas encore disponible** |
+
+Tant que `agents/` n'existe pas, `game/simulation.py` ne peut pas être importé
+et ses tests doivent attendre la livraison du Membre 2 (ou utiliser un agent
+de test local, hors dépôt). Les autres modules `game/` et `theory/` n'ont
+aucune dépendance vers `agents/` et sont testables dès maintenant.

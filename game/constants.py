@@ -9,7 +9,6 @@ Dépendance autorisée : uniquement ``game.actions``.
 
 from pathlib import Path
 from typing import Final
-
 from game.actions import Action
 
 # Nombre d'actions disponibles pour chaque joueur.
@@ -33,8 +32,11 @@ REFERENCE_GAME_VALUE: Final[float] = ((N_ACTIONS - 1) * REWARD_GOAL + REWARD_SAV
 # Tolérance pour vérifier qu'une distribution somme à 1 et reste positive.
 PROBABILITY_TOLERANCE: Final[float] = 1e-9
 
+# Bruit numérique : valeurs négatives ramenées à 0 après un calcul de programmation linéaire, et écarts ignorés pour départager deux actions de gain espéré identique.
+NUMERICAL_NOISE_TOLERANCE: Final[float] = 1e-12
+
 # Tolérance pour comparer un résultat de programmation linéaire à la valeur théorique de l'équilibre.
-EQUILIBRIUM_TOLERANCE: Final[float] = 0.5
+EQUILIBRIUM_TOLERANCE: Final[float] = 1e-6
 
 # Nombre minimal de manches d'un match.
 MIN_NUM_ROUNDS: Final[int] = 1
