@@ -1,40 +1,72 @@
 """Agent « fréquences » : heuristique adaptative à mémoire courte."""
 from collections import deque
+
 import numpy as np
-from .base_agent import BaseAgent, own_utility, best_response_policy
+
+from agents.base_agent import BaseAgent
+from game.actions import Action
+from game.models import Observation, PayoffMatrix, Strategy
+from theory.equilibrium import best_response
 
 
 class FrequencyAgent(BaseAgent):
-    """Estime la distribution de l'adversaire sur ses `window` DERNIÈRES actions
-    (fenêtre glissante), avec un lissage de Laplace `smoothing` (pseudo-comptes
-    qui évitent les fréquences nulles), puis joue la meilleure réponse.
+    """Estime la distribution adverse sur les ``window`` dernières manches,
+    avec un lissage de Laplace, puis joue la meilleure réponse.
 
-    Différence avec Fictitious Play (documentée comme l'exige le cahier) :
-      * ici : mémoire COURTE (fenêtre) -> réagit vite aux changements de style ;
-      * Fictitious Play : mémoire COMPLÈTE (comptes cumulés depuis le début).
+    Différence avec Fictitious Play : mémoire courte (fenêtre), donc réaction
+    rapide aux changements de style de l'adversaire.
     """
-    name = "frequences"
 
-    def __init__(self, role, window=10, smoothing=0.5, seed=None):
+    def __init__(
+        self,
+        payoff_matrix: PayoffMatrix,
+        seed: int,
+        window: int = 10,
+        smoothing: float = 0.5,
+    ) -> None:
+        """Initialise l'agent.
+
+        Args:
+            payoff_matrix: Matrice des gains de l'attaquant.
+            seed: Graine du générateur aléatoire.
+            window: Taille de la fenêtre glissante (>= 1).
+            smoothing: Pseudo-comptes de lissage par action (> 0).
+
+        Raises:
+            ValueError: Si ``window`` ou ``smoothing`` est invalide.
+        """
         if window < 1:
             raise ValueError("window doit être >= 1")
-        self.window = window
-        self.smoothing = smoothing
-        super().__init__(role, seed)
+        if smoothing <= 0:
+            raise ValueError("smoothing doit être > 0")
+        self.window: int = window
+        self.smoothing: float = smoothing
+        super().__init__(payoff_matrix, seed)
 
-    def reset(self):
+    def reset(self) -> None:
+        """Vide la fenêtre et réinitialise le générateur."""
         super().reset()
-        self.recent = deque(maxlen=self.window)   # dernières actions adverses
+        self.recent: deque[Action] = deque(maxlen=self.window)
 
-    def _observe(self, own_action, opponent_action):
+    def _observe(self, own_action: Action, opponent_action: Action) -> None:
         self.recent.append(opponent_action)
 
-    def estimated_opponent(self):
-        """Fréquences lissées de l'adversaire dans la fenêtre (vecteur de somme 1)."""
-        counts = np.full(3, float(self.smoothing))
-        for a in self.recent:
-            counts[a] += 1.0
-        return counts / counts.sum()
+    def estimated_opponent(self) -> Strategy:
+        """Retourne les fréquences lissées de l'adversaire dans la fenêtre."""
+        counts = np.full(len(Action), self.smoothing, dtype=np.float64)
+        for action in self.recent:
+            counts[action] += 1.0
+        return tuple(float(p) for p in counts / counts.sum())
 
-    def policy(self, observation):
-        return best_response_policy(own_utility(observation.payoff, self.role), self.estimated_opponent())
+    def choose_action(self, observation: Observation) -> Action:
+        """Joue la meilleure réponse aux fréquences estimées.
+
+        Args:
+            observation: Observation autorisée ; son rôle fixe l'orientation.
+
+        Returns:
+            La meilleure réponse pure du rôle courant.
+        """
+        return best_response(
+            self.payoff_matrix, observation.role, self.estimated_opponent()
+        )
