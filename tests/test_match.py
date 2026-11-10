@@ -1,11 +1,17 @@
+"""Tests de la couche interface (ui/match.py) branchée sur les vrais agents et game/."""
+import itertools
+
 import pytest
 
+from agents.base_agent import Observation
 from ui import compat
-from ui.match import (ATTAQUANT, GARDIEN, MODE_HUMAIN_IA, MODE_IA_IA, Match, MatchConfig)
+from ui.match import ATTAQUANT, GARDIEN, MODE_HUMAIN_IA, MODE_IA_IA, Match, MatchConfig
+
+NIVEAUX = list(compat.LEVELS.values())
 
 
 class Espion:
-    """Agent qui enregistre ce qu'il voit."""
+    """Faux agent qui enregistre ce qu'il reçoit (indices d'actions 0/1/2)."""
 
     def __init__(self, action):
         self.action, self.observations, self.updates, self.resets = action, [], [], 0
@@ -29,70 +35,74 @@ def match_humain(role, espion, n=3):
     return Match(cfg, agents={ia: espion})
 
 
-def test_agent_ne_voit_pas_l_action_courante():
-    espion = Espion("centre")
+def test_observation_sans_action_adverse():
+    assert set(Observation.__dataclass_fields__) == {"payoff", "round_index"}
+    espion = Espion(1)
     m = match_humain(ATTAQUANT, espion)
     m.play_round("droite")
-    assert espion.observations[0]["history"] == []
     m.play_round("gauche")
-    assert espion.observations[1]["history"] == [("droite", "centre")]
+    assert [o.round_index for o in espion.observations] == [1, 2]
 
 
 def test_update_apres_revelation_et_reset_au_debut():
-    espion = Espion("gauche")
+    espion = Espion(0)  # le gardien plonge à gauche
     m = match_humain(ATTAQUANT, espion)
     assert espion.resets == 1
     m.play_round("gauche")  # tir arrêté : le gardien gagne +1
-    assert espion.updates == [(1, "gauche", "gauche", 1)]
+    assert espion.updates == [(1, 0, 0, 1.0)]
+    m.play_round("droite")  # but : le gardien perd 1
+    assert espion.updates[1] == (2, 0, 2, -1.0)
 
 
-def test_gains_somme_nulle_et_matrice():
-    for a in compat.ACTIONS:
-        for g in compat.ACTIONS:
-            res, ga, gg = compat.resolve_round(a, g)
-            assert ga + gg == 0
-            assert (res == "arret") == (a == g)
+def test_resolution_conforme_a_la_matrice_de_reference():
+    matrice = compat.reference_matrix()
+    for i, j in itertools.product(range(3), repeat=2):
+        res, ga, gg = compat.resolve_round(1, compat.ACTIONS[i], compat.ACTIONS[j], matrice)
+        assert ga == matrice[i][j] and ga + gg == 0
+        assert (res == "arret") == (i == j)
 
 
 def test_action_invalide_rejetee():
-    m = match_humain(GARDIEN, Espion("gauche"))
+    m = match_humain(GARDIEN, Espion(0))
     with pytest.raises(ValueError):
         m.play_round("haut")
     with pytest.raises(ValueError):
         m.play_round(None)
 
 
-def test_les_deux_roles_se_terminent():
-    for role in (ATTAQUANT, GARDIEN):
-        m = match_humain(role, Espion("centre"), n=4)
-        for _ in range(4):
-            m.play_round("gauche")
-        assert m.finished
+def test_partie_humaine_complete_contre_chaque_niveau_et_role():
+    for niveau, role in itertools.product(NIVEAUX, (ATTAQUANT, GARDIEN)):
+        ia = GARDIEN if role == ATTAQUANT else ATTAQUANT
+        agents = {ATTAQUANT: None, GARDIEN: None}
+        agents[ia] = niveau
+        m = Match(MatchConfig(MODE_HUMAIN_IA, 6, agents, graine=5, role_humain=role))
+        for k in range(6):
+            m.play_round(compat.ACTIONS[k % 3])
+        assert m.finished and len(m.history) == 6
         with pytest.raises(RuntimeError):
             m.play_round("gauche")
 
 
-def test_ia_vs_ia_nombre_exact_de_manches():
-    for name in compat.LEVELS.values():
-        cfg = MatchConfig(MODE_IA_IA, 37, {ATTAQUANT: name, GARDIEN: "minimax"}, graine=3)
-        m = Match(cfg)
+def test_ia_vs_ia_toutes_les_paires_nombre_exact_de_manches():
+    for att, gar in itertools.product(NIVEAUX, NIVEAUX):
+        m = Match(MatchConfig(MODE_IA_IA, 37, {ATTAQUANT: att, GARDIEN: gar}, graine=3))
         m.run_all()
         assert len(m.history) == 37
 
 
 def test_reproductibilite_avec_graine():
-    def run():
-        m = Match(MatchConfig(MODE_IA_IA, 50, {ATTAQUANT: "frequences", GARDIEN: "minimax"}, graine=7))
+    def run(seed):
+        m = Match(MatchConfig(MODE_IA_IA, 60, {ATTAQUANT: "minimax", GARDIEN: "minimax"}, graine=seed))
         m.run_all()
         return m.history_rows()
 
-    assert run() == run()
+    assert run(7) == run(7)
+    assert run(7) != run(8)
 
 
-def test_les_quatre_agents_respectent_le_contrat():
-    for name in compat.LEVELS.values():
-        agent = compat.make_agent(name, seed=0)
-        obs = {"role": ATTAQUANT, "round": 1, "total_rounds": 3, "history": []}
-        assert agent.choose_action(obs) in compat.ACTIONS
-        agent.update(obs, "gauche", "centre", 1)
-        agent.reset()
+def test_le_niveau_deterministe_est_bien_deterministe():
+    m = Match(MatchConfig(MODE_HUMAIN_IA, 5, {ATTAQUANT: "deterministe", GARDIEN: None},
+                          graine=1, role_humain=GARDIEN))
+    for _ in range(5):
+        m.play_round("centre")
+    assert {r.action_attaquant for r in m.history} == {"gauche"}

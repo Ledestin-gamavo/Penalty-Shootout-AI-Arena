@@ -1,15 +1,25 @@
-"""Couche de branchement entre l'interface et les modules des Membres 1 et 2.
+"""Couche de branchement entre l'interface et les modules game/ (M1) et agents/ (M2).
 
-C'est LE SEUL fichier à modifier quand game/ et agents/ seront livrés.
-Si un vrai agent est introuvable ou ne s'instancie pas, on retombe sur l'agent factice.
+L'interface parle en français (« gauche », « attaquant »…) ; ce fichier traduit vers
+les conventions du moteur et des agents (indices 0/1/2, rôles « attacker » /
+« goalkeeper ») et inversement. Aucune règle de jeu n'est réécrite ici.
 """
-import importlib
+import numpy as np
+from numpy.random import SeedSequence
 
-from .stub_agents import STUBS
+from agents import ACTION_NAMES, AGENTS
+from agents.base_agent import Observation
+from game.actions import Action
+from game.payoff import resolve_payoff_matrix
+from game.rules import resolve_round as _resolve_round
 
-ACTIONS = ("gauche", "centre", "droite")
+# Actions affichées/stockées par l'interface : "gauche", "centre", "droite"
+ACTIONS = tuple(ACTION_NAMES)
 
-# Niveaux de difficulté (section 5 du cahier des charges)
+# Rôles de l'interface -> rôles des agents
+AGENT_ROLE = {"attaquant": "attacker", "gardien": "goalkeeper"}
+
+# Niveaux de difficulté (section 5 du cahier des charges) -> clé dans agents.AGENTS
 LEVELS = {
     "1 — Découverte": "deterministe",
     "2 — Adaptatif": "frequences",
@@ -28,39 +38,45 @@ AGENT_LABELS = {
     "fictitious_play": "Fictitious Play",
     "minimax": "Minimax",
 }
-
-# TODO Membre 2 : confirmer les noms de modules/classes et la signature du constructeur.
-_REAL_AGENTS = {
-    "deterministe": ("agents.deterministic_agent", "DeterministicAgent"),
-    "frequences": ("agents.frequency_agent", "FrequencyAgent"),
-    "minimax": ("agents.minimax_agent", "MinimaxAgent"),
-    "fictitious_play": ("agents.fictitious_play_agent", "FictitiousPlayAgent"),
-}
-
-AGENT_SOURCE = {}  # nom -> "réel" ou "factice" (affiché dans la barre latérale)
+assert set(LEVELS.values()) == set(AGENTS) == set(AGENT_LABELS), "agents/ et ui/ ne sont plus alignés"
 
 
-def make_agent(name, seed=0):
-    """Retourne un agent respectant le contrat BaseAgent."""
-    module_name, class_name = _REAL_AGENTS[name]
-    try:
-        cls = getattr(importlib.import_module(module_name), class_name)
-        agent = cls(seed=seed)
-        AGENT_SOURCE[name] = "réel"
-        return agent
-    except (ImportError, AttributeError, TypeError):
-        AGENT_SOURCE[name] = "factice"
-        return STUBS[name](seed=seed)
+def reference_matrix():
+    """Matrice des gains de l'attaquant (M1 : game.payoff)."""
+    return resolve_payoff_matrix(None)
 
 
-def resolve_round(action_attaquant, action_gardien):
-    """Règle de base (section 3.2). Retourne (résultat, gain_attaquant, gain_gardien).
+def derive_seeds(seed):
+    """Deux graines indépendantes (attaquant, gardien), comme game.simulation.run_match."""
+    a, g = (int(s) for s in SeedSequence(seed).generate_state(2))
+    return a, g
 
-    TODO Membre 1 : remplacer par game.rules / game.payoff une fois livrés.
-    """
-    for a in (action_attaquant, action_gardien):
-        if a not in ACTIONS:
-            raise ValueError(f"Action invalide : {a!r}")
-    if action_attaquant == action_gardien:
-        return "arret", -1, 1
-    return "but", 1, -1
+
+def make_agent(name, role, seed):
+    """Crée l'agent `name` pour le rôle d'interface `role` ("attaquant" / "gardien")."""
+    return AGENTS[name](AGENT_ROLE[role], seed=seed)
+
+
+def make_observation(matrix, round_number):
+    """Observation autorisée (matrice + numéro de manche, jamais l'action adverse)."""
+    return Observation(payoff=np.array(matrix, dtype=float), round_index=round_number)
+
+
+def action_index(name):
+    return ACTIONS.index(name)
+
+
+def action_name(value):
+    """Index (ou Action) -> nom d'interface ; accepte aussi un nom déjà valide."""
+    if isinstance(value, str):
+        if value not in ACTIONS:
+            raise ValueError(f"Action invalide : {value!r}")
+        return value
+    return ACTIONS[int(value)]
+
+
+def resolve_round(round_number, action_attaquant, action_gardien, matrix):
+    """Délègue à game.rules.resolve_round. Retourne (résultat, gain_attaquant, gain_gardien)."""
+    res = _resolve_round(round_number, Action(action_index(action_attaquant)),
+                         Action(action_index(action_gardien)), matrix)
+    return ("but" if res.is_goal else "arret"), res.attacker_reward, res.goalkeeper_reward

@@ -68,7 +68,7 @@ def _human_game(match):
     c1, c2, c3 = st.columns(3)
     c1.metric("Buts", s["buts"])
     c2.metric("Arrêts", s["arrets"])
-    c3.metric("Ton gain cumulé", f"{match.human_gain():+d}")
+    c3.metric("Ton gain cumulé", f"{match.human_gain():+g}")
 
     if match.history:
         last = match.history[-1]
@@ -81,14 +81,13 @@ def _human_game(match):
         st.subheader(verbe)
         cols = st.columns(3)
         for col, action in zip(cols, ACTIONS):
-            col.button(ZONES[action], key=f"zone_{action}", on_click=_jouer, args=(action,),
-                       width="stretch")
+            col.button(ZONES[action], key=f"zone_{action}", on_click=_jouer, args=(action,))
     else:
         _human_bilan(match)
 
     if match.history:
         with st.expander("Historique de la session", expanded=match.finished):
-            st.dataframe(pd.DataFrame(match.history_rows()), hide_index=True, width="stretch")
+            st.dataframe(pd.DataFrame(match.history_rows()), hide_index=True)
 
     if st.button("Abandonner / changer les réglages" if not match.finished else "Nouvelle configuration"):
         state.reset_human()
@@ -101,9 +100,9 @@ def _human_bilan(match):
     st.subheader("Fin de partie")
     gain = match.human_gain()
     if gain > 0:
-        st.success(f"Victoire ! Gain total : {gain:+d}")
+        st.success(f"Victoire ! Gain total : {gain:+g}")
     elif gain < 0:
-        st.error(f"Défaite. Gain total : {gain:+d}")
+        st.error(f"Défaite. Gain total : {gain:+g}")
     else:
         st.info("Égalité (gain total : 0).")
     st.markdown("**Tendances observées** (part de chaque zone jouée) :")
@@ -161,4 +160,4 @@ def _sim_result(sim, detail):
         shown = rows if detail == "Détaillée" else rows[-20:]
         if detail != "Détaillée" and len(rows) > 20:
             st.caption("Simulation accélérée : seules les 20 dernières manches sont affichées.")
-        st.dataframe(pd.DataFrame(shown), hide_index=True, width="stretch")
+        st.dataframe(pd.DataFrame(shown), hide_index=True)

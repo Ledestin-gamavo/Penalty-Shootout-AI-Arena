@@ -43,16 +43,15 @@ Astuce : contre le niveau 1, change de zone dès que tu as repéré son réflexe
 
 | Problème | Solution |
 |---|---|
-| Message « Agents factices en usage » | Normal tant que `agents/` n'est pas branché (voir ci-dessous). |
 | La partie « repart de zéro » | Ne pas recharger la page (F5) : l'état est conservé dans la session du navigateur. |
 | `ModuleNotFoundError: ui` | Lancer `streamlit run app.py` depuis la racine du projet. |
 
-## 6. Pour l'équipe : brancher les vrais modules
+## 6. Pour l'équipe : où l'interface se branche
 
-Tout passe par **`ui/compat.py`** (seul fichier à modifier) :
+Tout passe par **`ui/compat.py`** (traduction français / conventions du moteur) :
 
-- `_REAL_AGENTS` : noms de modules et de classes des agents du Membre 2 (constructeur attendu : `Classe(seed=...)`).
-- `resolve_round(...)` : à remplacer par les fonctions de `game/` (Membre 1).
-- Les pages Laboratoire / Analyse / Benchmark sont des placeholders pour le Membre 4.
+- agents : `agents.AGENTS` (`Classe(role, seed=...)`, actions entières 0/1/2) ;
+- règles : `game.rules.resolve_round` et `game.payoff.resolve_payoff_matrix` ;
+- les graines des deux agents sont dérivées comme dans `game.simulation.run_match` (`SeedSequence`).
 
 Lancer les tests : `python -m pytest -q`

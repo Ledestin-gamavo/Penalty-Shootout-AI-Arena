@@ -4,7 +4,6 @@ Garantie centrale (EF04, décisions simultanées) : dans play_round, chaque agen
 à partir de l'historique PUBLIC des manches terminées uniquement ; les actions sont ensuite
 révélées ensemble, puis seulement, update() est appelé.
 """
-import random
 from collections import Counter
 from dataclasses import dataclass
 from typing import Optional
@@ -29,8 +28,8 @@ class RoundResult:
     action_attaquant: str
     action_gardien: str
     resultat: str  # "but" ou "arret"
-    gain_attaquant: int
-    gain_gardien: int
+    gain_attaquant: float
+    gain_gardien: float
 
 
 @dataclass
@@ -53,15 +52,16 @@ class Match:
         """`agents` permet d'injecter des agents (tests) ; sinon ils sont créés via compat."""
         self.config = config
         self.history = []
-        self._rng = random.Random(config.graine)
+        self.matrix = compat.reference_matrix()
         if agents is not None:
             self.agents = dict(agents)
         else:
             self.agents = {}
-            for i, role in enumerate(ROLES):
+            seeds = dict(zip(ROLES, compat.derive_seeds(config.graine)))
+            for role in ROLES:
                 name = config.agents.get(role)
                 if name is not None:
-                    self.agents[role] = compat.make_agent(name, seed=config.graine + i)
+                    self.agents[role] = compat.make_agent(name, role, seeds[role])
         for agent in self.agents.values():
             agent.reset()
 
@@ -70,30 +70,19 @@ class Match:
         return len(self.history) >= self.config.nombre_manches
 
     def _observation(self, role):
-        return {
-            "role": role,
-            "round": len(self.history) + 1,
-            "total_rounds": self.config.nombre_manches,
-            "history": [(r.action_attaquant, r.action_gardien) for r in self.history],
-        }
+        # Information autorisée uniquement : matrice et numéro de manche (contrat §8).
+        return compat.make_observation(self.matrix, len(self.history) + 1)
 
     def _to_action(self, choice):
-        """Accepte une action, ou une politique (dict ou séquence de 3 probabilités)."""
-        if isinstance(choice, str):
-            action = choice
-        else:
-            weights = [choice[a] for a in ACTIONS] if isinstance(choice, dict) else list(choice)
-            action = self._rng.choices(ACTIONS, weights=weights)[0]
-        if action not in ACTIONS:
-            raise ValueError(f"Action invalide : {action!r}")
-        return action
+        """Action de l'agent (index 0/1/2) -> nom d'interface."""
+        return compat.action_name(choice)
 
     def play_round(self, human_action=None):
         if self.finished:
             raise RuntimeError("La partie est terminée.")
         role_h = self.config.role_humain if self.config.mode == MODE_HUMAIN_IA else None
 
-        # 1. Décisions simultanées : historique public uniquement
+        # 1. Décisions simultanées : chaque agent ne reçoit qu'une Observation (sans action adverse)
         observations, actions = {}, {}
         for role, agent in self.agents.items():
             observations[role] = self._observation(role)
@@ -101,18 +90,18 @@ class Match:
         if role_h is not None:
             if human_action is None:
                 raise ValueError("Une action humaine est requise.")
-            if human_action not in ACTIONS:
-                raise ValueError(f"Action invalide : {human_action!r}")
+            human_action = compat.action_name(human_action)  # ValueError si invalide
             actions[role_h] = human_action
 
         # 2. Révélation et résolution
-        resultat, g_att, g_gar = compat.resolve_round(actions[ATTAQUANT], actions[GARDIEN])
+        resultat, g_att, g_gar = compat.resolve_round(len(self.history) + 1, actions[ATTAQUANT], actions[GARDIEN], self.matrix)
         record = RoundResult(len(self.history) + 1, actions[ATTAQUANT], actions[GARDIEN], resultat, g_att, g_gar)
 
         # 3. Mise à jour des agents APRÈS révélation
         for role, agent in self.agents.items():
             reward = g_att if role == ATTAQUANT else g_gar
-            agent.update(observations[role], actions[role], actions[autre_role(role)], reward)
+            agent.update(observations[role], compat.action_index(actions[role]),
+                         compat.action_index(actions[autre_role(role)]), reward)
 
         self.history.append(record)
         return record
