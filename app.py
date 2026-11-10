@@ -1,7 +1,6 @@
 """Point d'entrée : streamlit run app.py"""
 import streamlit as st
 
-from ui import compat
 from ui.analysis_page import render_analysis_page
 from ui.benchmark_page import render_benchmark_page
 from ui.laboratory_page import render_laboratory_page
@@ -23,7 +22,4 @@ with st.sidebar.expander("Règles rapides"):
         "Attaquant et gardien choisissent **en même temps** gauche, centre ou droite. "
         "Même zone = **arrêt** ; sinon = **but**. Jeu à somme nulle."
     )
-if any(v == "factice" for v in compat.AGENT_SOURCE.values()):
-    st.sidebar.warning("Agents factices en usage (dossier agents/ pas encore branché).")
-
 PAGES[choix]()
