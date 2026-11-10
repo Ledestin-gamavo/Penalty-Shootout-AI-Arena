@@ -14,12 +14,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Final, TypeAlias
 from game.actions import Action
-from game.constants import (
-    DEFAULT_SEED,
-    MAX_NUM_ROUNDS,
-    MIN_NUM_ROUNDS,
-    REWARD_GOAL,
-)
+from game.constants import (DEFAULT_SEED, MAX_NUM_ROUNDS, MIN_NUM_ROUNDS, REWARD_GOAL,)
 
 # Distribution de probabilités sur les actions, indexée par ``Action``.
 Strategy: TypeAlias = tuple[float, ...]
@@ -111,6 +106,17 @@ class Observation:
 
     role: Role
     round_number: int
+
+    def __post_init__(self) -> None:
+        """Vérifie les invariants de l'observation.
+
+            Raises:
+            ValueError: Si le numéro de manche est invalide.
+        """
+        if self.round_number < 1:
+            raise ValueError(
+                f"round_number doit être au moins 1, reçu : {self.round_number}."
+        )
 
 
 @dataclass(frozen=True, slots=True)
