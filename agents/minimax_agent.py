@@ -1,53 +1,44 @@
-"""Agent Minimax : stratégie mixte optimale calculée par programmation linéaire."""
-import numpy as np
-from scipy.optimize import linprog
-from .base_agent import BaseAgent, own_utility
-
-
-def solve_maximin(utility):
-    """Résout max_x min_j par programmation linéaire.
-
-    Variables (x_1..x_m, v). On maximise vsous condition  pour
-    chaque colonne j, sum_i x_i = 1, x >= 0, v libre (c'est le programme de J1 du cours).
-    Retourne (x, v) : stratégie optimale et valeur garantie.
-    """
-    U = np.asarray(utility, dtype=float)
-    m, n = U.shape
-    c = np.r_[np.zeros(m), -1.0]                       # maximiser v = minimiser -v
-    A_ub = np.hstack([-U.T, np.ones((n, 1))])          # v - U^T x <= 0
-    res = linprog(c, A_ub=A_ub, b_ub=np.zeros(n),
-                  A_eq=[np.r_[np.ones(m), 0.0]], b_eq=[1.0],
-                  bounds=[(0, None)] * m + [(None, None)], method="highs")
-    if not res.success:
-        raise RuntimeError(f"programmation linéaire non résolue : {res.message}")
-    x = np.clip(res.x[:m], 0.0, None)
-    return x / x.sum(), float(res.x[m])
+"""Agent Minimax : stratégie mixte optimale issue de solve_equilibrium."""
+from agents.base_agent import BaseAgent
+from game.actions import Action
+from game.models import Equilibrium, Observation, PayoffMatrix
+from theory.equilibrium import solve_equilibrium
 
 
 class MinimaxAgent(BaseAgent):
-    """Joue sa stratégie de sécurité (maximin) pour la matrice reçue. N'apprend rien :
-    sa politique ne dépend pas de l'historique. Sur la matrice de base elle est
-    uniforme (1/3, 1/3, 1/3) et la valeur est 1/3 pour l'attaquant.
+    """Joue la stratégie d'équilibre de son rôle, sans rien apprendre.
 
-    Le tirage au sort dans choose_action est l'exécution de la stratégie mixte
-    calculée, pas un agent aléatoire.
+    Le tirage dans ``choose_action`` exécute la stratégie mixte calculée ;
+    ce n'est pas un agent aléatoire.
     """
-    name = "minimax"
 
-    def reset(self):
-        super().reset()
-        self._cache = {}
+    def __init__(self, payoff_matrix: PayoffMatrix, seed: int) -> None:
+        """Calcule l'équilibre une seule fois.
 
-    def _solve(self, observation):
-        U = own_utility(observation.payoff, self.role)
-        key = (self.role, U.tobytes())
-        if key not in self._cache:
-            self._cache[key] = solve_maximin(U)
-        return self._cache[key]
+        Args:
+            payoff_matrix: Matrice des gains de l'attaquant.
+            seed: Graine du générateur aléatoire.
 
-    def policy(self, observation):
-        return self._solve(observation)[0]
+        Raises:
+            ValueError: Si la matrice est invalide.
+            RuntimeError: Si le solveur échoue.
+        """
+        super().__init__(payoff_matrix, seed)
+        self._equilibrium: Equilibrium = solve_equilibrium(payoff_matrix)
 
-    def game_value(self, observation):
-        """Valeur du jeu vue par l'agent  (attaquant : v ; gardien : -v)."""
-        return self._solve(observation)[1]
+    @property
+    def game_value(self) -> float:
+        """Valeur du jeu du point de vue de l'attaquant."""
+        return self._equilibrium.value
+
+    def choose_action(self, observation: Observation) -> Action:
+        """Tire une action selon la stratégie d'équilibre du rôle courant.
+
+        Args:
+            observation: Observation autorisée ; son rôle choisit la stratégie.
+
+        Returns:
+            L'action tirée.
+        """
+        strategy = self._equilibrium.strategy_of(observation.role)
+        return Action(int(self.rng.choice(len(strategy), p=strategy)))

@@ -1,110 +1,83 @@
-"""Contrat commun des agents (cahier des charges, section 8.2).
+"""Classe abstraite des agents (contrat d'API, §7.7)."""
+from abc import ABC, abstractmethod
 
-Conventions (à partager avec les 3 autres membres) :
-  * Actions : entiers 0 = gauche, 1 = centre, 2 = droite (pour les deux rôles).
-  * Matrice de gains `payoff` : toujours du point de vue de l'ATTAQUANT.
-        payoff[i, j] = gain de l'attaquant si le tir est i et le plongeon j.
-    L'attaquant maximise ; le gardien minimise (son gain est -payoff).
-  * Le rôle de l'agent ("attacker" ou "goalkeeper") est fixé à la création.
-"""
-from dataclasses import dataclass
 import numpy as np
 
-ACTIONS = (0, 1, 2)
-ACTION_NAMES = ("gauche", "centre", "droite")
-ROLES = ("attacker", "goalkeeper")
+from game.actions import Action
+from game.models import Observation, PayoffMatrix
+from theory.validation import validate_payoff_matrix
 
 
-@dataclass(frozen=True, eq=False)
-class Observation:
-    """Seules informations données à un agent avant de choisir.
+class BaseAgent(ABC):
+    """Classe mère des agents.
 
-    Aucun champ ne contient l'action courante de l'adversaire (exigence EF04).
-    La matrice est COPIÉE puis verrouillée en lecture seule : ni un agent ni
-    l'interface ne peut modifier par erreur la matrice du moteur. Égalité et
-    hachage se font sur les valeurs (utile pour les caches et les tests).
+    L'agent ne connaît que la matrice des gains (information publique), son
+    historique et l'observation autorisée. Son rôle est lu dans
+    ``observation.role`` à chaque décision, jamais stocké.
+
+    Attributes:
+        payoff_matrix: Matrice des gains de l'attaquant.
+        seed: Graine du générateur aléatoire de l'agent.
+        rng: Générateur aléatoire propre à l'agent.
+        t: Nombre de manches terminées vues par l'agent.
     """
-    payoff: np.ndarray      # matrice 3x3, gains de l'attaquant
-    round_index: int = 0    # numéro de la manche 
 
-    def __post_init__(self):
-        p = np.array(self.payoff, dtype=float, copy=True)     
-        if p.shape != (3, 3):
-            raise ValueError(f"payoff doit être une matrice 3x3, reçu {p.shape}")
-        p.setflags(write=False)                               # lecture seule
-        object.__setattr__(self, "payoff", p)                 # nécessaire car la classe est « frozen »
+    def __init__(self, payoff_matrix: PayoffMatrix, seed: int) -> None:
+        """Initialise l'agent.
 
-    def __eq__(self, other):
-        return (isinstance(other, Observation) and self.round_index == other.round_index
-                and np.array_equal(self.payoff, other.payoff))
+        Args:
+            payoff_matrix: Matrice des gains de l'attaquant.
+            seed: Graine du générateur aléatoire.
 
-    def __hash__(self):
-        return hash((self.round_index, self.payoff.tobytes()))
-
-
-def own_utility(payoff, role):
-    """Matrice d'utilité vue par l'agent : lignes = ses actions, colonnes = celles
-    de l'adversaire, et l'agent MAXIMISE toujours cette matrice.
-
-    Attaquant : U = payoff.   Gardien : U = -payoff.T  (on transpose et on change le signe).
-    Ainsi le même code (meilleure réponse, programmation linéaire) sert aux deux rôles.
-    """
-    payoff = np.asarray(payoff, dtype=float)
-    return payoff if role == "attacker" else -payoff.T
-
-
-def best_response_policy(utility, opponent_dist, tol=1e-9):
-    """Politique de meilleure réponse à une distribution adverse estimée.
-
-    On calcule le gain espéré de chaque action propre (utility @ q) puis on joue
-    avec une probabilité égale toutes les actions optimales. Quand plusieurs
-    actions sont à égalité (cas fréquent : le jeu de base est symétrique), le
-    tirage au sort départage, au lieu de toujours prendre la première.
-    """
-    values = np.asarray(utility, dtype=float) @ np.asarray(opponent_dist, dtype=float)
-    best = values >= values.max() - tol
-    policy = best.astype(float)
-    return policy / policy.sum()
-
-
-class BaseAgent:
-    """Classe mère. Les sous-classes définissent policy() et, si besoin, _observe()."""
-    name = "base"
-
-    def __init__(self, role, seed=None):
-        if role not in ROLES:
-            raise ValueError(f"role doit être dans {ROLES}, reçu : {role!r}")
-        self.role = role
-        self.seed = seed
+        Raises:
+            ValueError: Si la matrice est invalide.
+        """
+        validate_payoff_matrix(payoff_matrix)
+        self.payoff_matrix: PayoffMatrix = payoff_matrix
+        self.seed: int = seed
         self.reset()
 
-    #C'est une convention que j'ai prise mais qu'on pourra mpdofier lors de l'intégration avec le moteur. L'agent ne doit pas avoir accès à l'action de l'adversaire avant de choisir la sienne.
-    def policy(self, observation):
-        """Retourne un vecteur de 3 probabilités (>= 0, somme 1). Ne doit utiliser
-        que l'état interne (mis à jour par update) et l'observation."""
-        raise NotImplementedError
+    @abstractmethod
+    def choose_action(self, observation: Observation) -> Action:
+        """Choisit une action. Reçoit UNIQUEMENT l'observation autorisée.
 
-    def _observe(self, own_action, opponent_action):
-        """Mise à jour de la mémoire spécifique à l'agent (optionnel)."""
+        Args:
+            observation: Rôle et numéro de manche.
 
-    # contrat du cahier des charges
-    def choose_action(self, observation):
-        """Tire une action selon policy(). Retourne un entier 0, 1 ou 2."""
-        p = np.asarray(self.policy(observation), dtype=float)
-        if p.shape != (3,) or (p < -1e-12).any() or abs(p.sum() - 1.0) > 1e-9:
-            raise ValueError(f"politique invalide : {p}")
-        p = np.clip(p, 0.0, None)
-        return int(self.rng.choice(3, p=p / p.sum()))
+        Returns:
+            L'action choisie.
+        """
 
-    def update(self, observation, own_action, opponent_action, reward):
-        """Appelé APRÈS la révélation des deux actions de la manche."""
-        for a in (own_action, opponent_action):
-            if a not in ACTIONS:
-                raise ValueError(f"action invalide : {a!r}")
+    def update(
+        self,
+        observation: Observation,
+        own_action: Action,
+        opponent_action: Action,
+        reward: float,
+    ) -> None:
+        """Met à jour l'agent APRÈS la révélation des deux actions.
+
+        Args:
+            observation: Observation de la manche terminée.
+            own_action: Action jouée par l'agent.
+            opponent_action: Action jouée par l'adversaire.
+            reward: Gain de l'agent pour cette manche.
+
+        Raises:
+            ValueError: Si une des actions est invalide.
+        """
+        self._observe(Action(own_action), Action(opponent_action))
         self.t += 1
-        self._observe(own_action, opponent_action)
 
-    def reset(self):
-        """Efface la mémoire et réinitialise le générateur aléatoire (reproductibilité)."""
-        self.rng = np.random.default_rng(self.seed)
-        self.t = 0
+    def reset(self) -> None:
+        """Réinitialise l'état interne ET le générateur (graine d'origine)."""
+        self.rng: np.random.Generator = np.random.default_rng(self.seed)
+        self.t: int = 0
+
+    def _observe(self, own_action: Action, opponent_action: Action) -> None:
+        """Mémorise une manche terminée (à surcharger si besoin).
+
+        Args:
+            own_action: Action jouée par l'agent.
+            opponent_action: Action jouée par l'adversaire.
+        """
