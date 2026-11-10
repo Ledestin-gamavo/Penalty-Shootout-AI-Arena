@@ -14,7 +14,6 @@ import random
 from collections import Counter
 from collections.abc import Mapping
 from dataclasses import dataclass
-
 from . import compat
 from .compat import UiAgent, UiChoice, UiObservation
 
@@ -46,8 +45,8 @@ class RoundResult:
     action_attaquant: str
     action_gardien: str
     resultat: str  # "but" ou "arret"
-    gain_attaquant: int
-    gain_gardien: int
+    gain_attaquant: float
+    gain_gardien: float
 
 
 @dataclass
@@ -192,13 +191,13 @@ class Match:
             g_att,
             g_gar,
         )
-
         # 3. Mise à jour des agents APRÈS révélation
         for role, agent in self.agents.items():
             reward = g_att if role == ATTAQUANT else g_gar
             agent.update(
                 observations[role], actions[role], actions[autre_role(role)], reward
             )
+
 
         self.history.append(record)
         return record

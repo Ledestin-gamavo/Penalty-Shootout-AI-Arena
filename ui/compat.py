@@ -1,3 +1,4 @@
+
 """Couche de branchement entre l'interface et les modules ``game/`` et ``agents/``.
 
 L'interface manipule des actions et des rôles sous forme de texte

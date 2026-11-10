@@ -170,15 +170,15 @@ def _human_game(match: Match) -> None:
                 key=f"zone_{action}",
                 on_click=_jouer,
                 args=(action,),
-                width="stretch",
             )
     else:
         _human_bilan(match)
 
     if match.history:
         with st.expander("Historique de la session", expanded=match.finished):
+
             st.dataframe(
-                pd.DataFrame(match.history_rows()), hide_index=True, width="stretch"
+                pd.DataFrame(match.history_rows()), hide_index=True
             )
 
     label = (
@@ -204,9 +204,9 @@ def _human_bilan(match: Match) -> None:
     st.subheader("Fin de partie")
     gain = match.human_gain()
     if gain > 0:
-        st.success(f"Victoire ! Gain total : {gain:+d}")
+        st.success(f"Victoire ! Gain total : {gain:+g}")
     elif gain < 0:
-        st.error(f"Défaite. Gain total : {gain:+d}")
+        st.error(f"Défaite. Gain total : {gain:+g}")
     else:
         st.info("Égalité (gain total : 0).")
     st.markdown("**Tendances observées** (part de chaque zone jouée) :")
@@ -307,4 +307,4 @@ def _sim_result(experiment: Experiment, detail: str) -> None:
                 "Simulation accélérée : seules les "
                 f"{_FAST_HISTORY_ROWS} dernières manches sont affichées."
             )
-        st.dataframe(rounds_to_dataframe(shown), hide_index=True, width="stretch")
+        st.dataframe(rounds_to_dataframe(shown), hide_index=True)
