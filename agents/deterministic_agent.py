@@ -1,6 +1,6 @@
 """Agent déterministe : suit une séquence fixe, sans jamais s'adapter."""
-from collections.abc import Sequence
 
+from collections.abc import Sequence
 from agents.base_agent import BaseAgent
 from game.actions import Action
 from game.models import Observation, PayoffMatrix
@@ -13,12 +13,8 @@ class DeterministicAgent(BaseAgent):
     meilleure réponse.
     """
 
-    def __init__(
-        self,
-        payoff_matrix: PayoffMatrix,
-        seed: int,
-        pattern: Sequence[Action] = (Action.LEFT,),
-    ) -> None:
+    def __init__(self, payoff_matrix: PayoffMatrix, seed: int, pattern: Sequence[Action] = (Action.LEFT,),
+                                    ) -> None:
         """Initialise l'agent.
 
         Args:

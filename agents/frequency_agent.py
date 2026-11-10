@@ -1,8 +1,7 @@
 """Agent « fréquences » : heuristique adaptative à mémoire courte."""
+
 from collections import deque
-
 import numpy as np
-
 from agents.base_agent import BaseAgent
 from game.actions import Action
 from game.models import Observation, PayoffMatrix, Strategy

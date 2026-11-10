@@ -1,8 +1,7 @@
 """Classe abstraite des agents (contrat d'API, §7.7)."""
+
 from abc import ABC, abstractmethod
-
 import numpy as np
-
 from game.actions import Action
 from game.models import Observation, PayoffMatrix
 from theory.validation import validate_payoff_matrix

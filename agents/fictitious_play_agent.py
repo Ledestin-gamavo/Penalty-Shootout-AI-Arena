@@ -1,7 +1,7 @@
 """Agent Fictitious Play : meilleure réponse à la stratégie empirique cumulée."""
+
 import numpy as np
 from numpy.typing import NDArray
-
 from agents.base_agent import BaseAgent
 from game.actions import Action
 from game.models import Observation, PayoffMatrix, Strategy
